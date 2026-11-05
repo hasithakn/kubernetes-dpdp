@@ -39,11 +39,13 @@ deployment:
     periodSeconds: 5
     failureThreshold: 60
 
+  # Scales on CPU. The JVM keeps its heap after load, so at the chart's 75% memory target the
+  # HPA never scales back down; 150% keeps memory from holding replicas up.
   hpa:
-    enabled: false
+    enabled: true
     maxReplicas: 4
-    averageUtilizationCPU: 65
-    averageUtilizationMemory: 75
+    averageUtilizationCPU: 40
+    averageUtilizationMemory: 150
 
 deploymentToml:
   clustering:
