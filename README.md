@@ -39,21 +39,21 @@ sessions and backend HTTPS on an IngressRoute instead.
 ## Images
 
 Two images, built for `linux/amd64` from the IS + DPDP Docker setup in `solutions-dpdp/deployment`.
-They are kept in one **private** Docker Hub repository, `<DOCKERHUB_USER>/wso2-dpdpiam`, because the
+They are kept in one **private** Docker Hub repository, `hasithakn/wso2-dpdpiam`, because the
 base image carries licensed WSO2 U2 updates:
 
 | Tag | Contents |
 | --- | --- |
-| `1.0.0-is7.3.0.<U2 level>` | `registry.wso2.com/wso2-is/is:7.3.0.0` + DPDP accelerator 1.0.0 + MySQL JDBC driver |
-| `1.0.0-is7.3.0.<U2 level>-mysql` | MySQL 8.4 that seeds the IS, consent v2 and DPDP schemas on first start |
+| `1.0.0-is7.3.0.24` | `registry.wso2.com/wso2-is/is:7.3.0.0` + DPDP accelerator 1.0.0 + MySQL JDBC driver |
+| `1.0.0-is7.3.0.24-mysql` | MySQL 8.4 that seeds the IS, consent v2 and DPDP schemas on first start |
 
 The MySQL image creates the database account IS uses with the credentials it was **built** with.
 `values-secrets.yaml` must use the same ones.
 
 ## Deploy on NKP
 
-Fill in the placeholders first: `<IS_HOSTNAME>` in `values-dpdp.yaml` and `ingressroute.yaml`, the
-image tags in `values-dpdp.yaml` and `mysql.yaml`, and `values-secrets.yaml`.
+Fill in the placeholders first: `<IS_HOSTNAME>` in `values-dpdp.yaml` and `ingressroute.yaml`, and
+`values-secrets.yaml` (copied from the example).
 
 ```powershell
 $env:KUBECONFIG="<path to the workload cluster kubeconfig>"
@@ -62,7 +62,7 @@ kubectl create namespace wso2-dpdp
 
 # Read-only Docker Hub access token
 kubectl create secret docker-registry dockerhub-pull -n wso2-dpdp `
-  --docker-server=https://index.docker.io/v1/ --docker-username=<DOCKERHUB_USER> --docker-password=<READ_ONLY_TOKEN>
+  --docker-server=https://index.docker.io/v1/ --docker-username=hasithakn --docker-password=<READ_ONLY_TOKEN>
 
 # MySQL root password (runtime only)
 kubectl create secret generic mysql-root -n wso2-dpdp --from-literal=password=<MYSQL_ROOT_PASSWORD>

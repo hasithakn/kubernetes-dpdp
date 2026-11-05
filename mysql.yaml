@@ -49,7 +49,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: mysql
-          image: docker.io/<DOCKERHUB_USER>/wso2-dpdpiam:<MYSQL_IMAGE_TAG>
+          image: docker.io/hasithakn/wso2-dpdpiam:1.0.0-is7.3.0.24-mysql
           imagePullPolicy: IfNotPresent
           env:
             - name: MYSQL_ROOT_PASSWORD

@@ -7,8 +7,8 @@
 deployment:
   image:
     registry: "docker.io"
-    repository: "<DOCKERHUB_USER>/wso2-dpdpiam"
-    tag: "<IS_IMAGE_TAG>"            # e.g. 1.0.0-is7.3.0.17
+    repository: "hasithakn/wso2-dpdpiam"
+    tag: "1.0.0-is7.3.0.24"
     pullPolicy: "IfNotPresent"
     imagePullSecret: "dockerhub-pull"
 
