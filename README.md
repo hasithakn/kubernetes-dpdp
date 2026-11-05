@@ -82,15 +82,14 @@ kubectl apply -n wso2-dpdp -f ingressroute.yaml
 Then open `https://<IS_HOSTNAME>/console` and sign in as the admin from `values-secrets.yaml`. The
 consent portal is at `/consent-portal`.
 
-**Before step 3, check how the cluster's Traefik selects routes:**
+**The route carries no ingress-class annotation.** NKP starts its Traefik with
+`--providers.kubernetesingress.ingressClass=kommander-traefik`, which filters `Ingress` objects
+only. Its IngressRoute provider has no class filter, and that provider skips a route whose
+`kubernetes.io/ingress.class` names any other class. On a different cluster, check with:
 
 ```powershell
-kubectl get deploy -A -o yaml | findstr /i "ingressclass"
+kubectl get deploy -A -o yaml | findstr /i "ingressclass kubernetescrd"
 ```
-
-If Traefik is started with an ingress class, `ingressroute.yaml` needs the matching
-`kubernetes.io/ingress.class` annotation (it carries `kommander-traefik`). If it is not, remove the
-annotation, or Traefik ignores the route.
 
 ## Run locally (Rancher Desktop)
 
