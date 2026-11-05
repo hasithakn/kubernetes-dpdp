@@ -1,0 +1,401 @@
+# WSO2 IS 7.3 + DPDP accelerator 1.0.0 on NKP, layered over the official kubernetes-is chart
+# (7.3.x). Credentials are not here - they come from values-secrets.yaml (see the .example).
+#
+#   helm upgrade --install wso2is ./kubernetes-is -n wso2-dpdp \
+#     -f values-dpdp.yaml -f values-secrets.yaml
+
+deployment:
+  image:
+    registry: "docker.io"
+    repository: "<DOCKERHUB_USER>/wso2-dpdpiam"
+    tag: "<IS_IMAGE_TAG>"            # e.g. 1.0.0-is7.3.0.17
+    pullPolicy: "IfNotPresent"
+    imagePullSecret: "dockerhub-pull"
+
+  replicas: 2
+  # All NKP workers report the same zone, so spreading by zone would not separate the pods.
+  antiAffinityTopologyKey: "kubernetes.io/hostname"
+
+  # Exposed through the Traefik IngressRoute in ingressroute.yaml instead: the chart's Ingress
+  # carries nginx-only annotations, and Traefik needs sticky sessions and HTTPS-to-backend set
+  # on the route.
+  ingress:
+    enabled: false
+    hostName: "<IS_HOSTNAME>"
+
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    jvm:
+      memOpts: "-Xms1024m -Xmx2048m"
+
+  # First start provisions the DPDP applications and roles, so allow up to ~6 minutes.
+  startupProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 5
+    failureThreshold: 60
+
+  hpa:
+    enabled: false
+    maxReplicas: 4
+    averageUtilizationCPU: 65
+    averageUtilizationMemory: 75
+
+deploymentToml:
+  clustering:
+    enabled: true
+
+  transport:
+    https:
+      properties:
+        proxyPort: 443
+
+  # type/url/driver only; username and password come from values-secrets.yaml. The schema is
+  # seeded by the MySQL image, by these database names.
+  database:
+    identity:
+      type: "mysql"
+      url: "jdbc:mysql://mysql:3306/WSO2IDENTITY_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+      driver: "com.mysql.cj.jdbc.Driver"
+      poolOptions:
+        validationQuery: "SELECT 1"
+        validationInterval: "30000"
+        testOnBorrow: "true"
+    shared:
+      type: "mysql"
+      url: "jdbc:mysql://mysql:3306/WSO2SHARED_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+      driver: "com.mysql.cj.jdbc.Driver"
+      poolOptions:
+        validationQuery: "SELECT 1"
+        validationInterval: "30000"
+        testOnBorrow: "true"
+    user:
+      type: "mysql"
+      url: "jdbc:mysql://mysql:3306/WSO2SHARED_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+      driver: "com.mysql.cj.jdbc.Driver"
+    # The consent tables are seeded into the identity database.
+    consent:
+      type: "mysql"
+      url: "jdbc:mysql://mysql:3306/WSO2IDENTITY_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+      driver: "com.mysql.cj.jdbc.Driver"
+    agentIdentity:
+      type: "mysql"
+      url: "jdbc:mysql://mysql:3306/WSO2AGENTIDENTITY_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+      driver: "com.mysql.cj.jdbc.Driver"
+
+  # The chart generates deployment.toml and copies it over the image's, so the accelerator's own
+  # settings (the block below its banner in wso2is-7.3.0-deployment.toml, release 1.0.0) are
+  # carried here. WSO2DPDP_DB reuses the identity DB credentials through $ref{}, as the
+  # accelerator's template does with its single DB_CONN_* pair.
+  extraConfigs: |
+    [[event_handler]]
+    name = "dpdpUserLifecycleEventHandler"
+    subscriptions = ["POST_DELETE_USER", "POST_SET_USER_CLAIMS"]
+
+    [datasource.WSO2DPDP_DB]
+    id = "WSO2DPDP_DB"
+    url = "jdbc:mysql://mysql:3306/WSO2DPDP_DB?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true"
+    username = "$ref{database.identity_db.username}"
+    password = "$ref{database.identity_db.password}"
+    driver = "com.mysql.cj.jdbc.Driver"
+    pool_options.validationQuery = "SELECT 1"
+    pool_options.validationInterval = "30000"
+    pool_options.testOnBorrow = true
+
+    [dpdp_accelerator.jdbc_persistence_manager]
+    data_source_name = "jdbc/WSO2DPDP_DB"
+    connection_verification_timeout_seconds = 1
+
+    [consent_mgt]
+    enable_v2_api = true
+    revoke_active_consents_on_create = false
+
+    [tenant_mgt]
+    enable_email_domain = true
+
+    [user_store.properties]
+    UsernameJavaRegEx = "^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,4}$"
+    UsernameJavaScriptRegEx = "^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,4}$"
+    UsernameJavaRegExViolationErrorMsg = "Username must be a valid email address."
+
+    [console.flows.scopes]
+    read = ["internal_flow_view", "internal_governance_view", "internal_consent_mgt_purpose_view"]
+
+    [[resource.access_control]]
+    context = "(.*)/consent-portal(.*)"
+    secure = "false"
+    http_method = "all"
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/topics(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["notifications:topics:read"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/topics(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "POST,DELETE"
+    scopes = ["notifications:topics:write"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/subscriptions(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["notifications:subscriptions:read"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/subscriptions(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "POST,DELETE"
+    scopes = ["notifications:subscriptions:write"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/events/poll(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "POST"
+    scopes = ["notifications:events:poll"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/deliveries/([^/]+)/completion"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "POST"
+    scopes = ["notifications:event-deliveries:complete"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/events(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["notifications:events:read"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/event-notifications/v1/events(.*)"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "POST"
+    scopes = ["notifications:events:write"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/consent-mgt/v1/consents/([^/]+)/status-history"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["consent:status-history:view:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/consent-mgt/v1/consents/([^/]+)/history"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["consent:history:view:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/consent-mgt/v1/me/consents/([^/]+)/status-history"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["consent:status-history:view:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/consent-mgt/v1/me/consents/([^/]+)/history"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "GET"
+    scopes = ["consent:history:view:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/scim2/Me"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    secure = "true"
+    http_method = "DELETE"
+    scopes = ["account:self:delete"]
+
+    [tenant_context.rewrite]
+    custom_webapps = [
+        "/consent-portal/",
+        "/api/dpdp/consent-mgt/v1/",
+        "/api/dpdp/complaints/v1/",
+        "/api/dpdp/event-notifications/v1/"
+    ]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+/attachments/[^/]+"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+/attachments"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+/comments"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+/timeline"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+/status"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints/[^/]+"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/me/complaints"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:self"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+/attachments/[^/]+"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+/attachments"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+/comments"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+/timeline"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+/status"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints/[^/]+"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "POST"
+    secure = "true"
+    scopes = ["complaints:write:any"]
+
+    [[resource.access_control]]
+    context = "(.*)/api/dpdp/complaints/v1/complaints"
+    allowed_auth_handlers = ["OAuthAuthentication"]
+    http_method = "GET"
+    secure = "true"
+    scopes = ["complaints:read:any"]
+
+    [dpdp_accelerator.consent_portal]
+    auto_provisioning_enabled = true
+    client_id = "DPDP_CONSENT_PORTAL"
+
+    [dpdp_accelerator.consent_api_invoker]
+    auto_provisioning_enabled = true
+    client_id = "DPDP_CONSENT_API_INVOKER"
+
+    [dpdp_accelerator.complaints]
+    statutory_due_period_days = 90
+    attachment_max_size_bytes = 10485760
+    attachment_max_files_per_upload = 5
+    email_notifications_enabled = false
+
+    [dpdp_accelerator.event_notifications]
+    system_topics_auto_create_enabled = true
+
+    [dpdp_accelerator.event_notifications.payload_signing]
+    enabled = true
+    audience = "dpdp-event-notifications"
+
+    [dpdp_accelerator.event_notifications.lifecycle_events]
+    publishing_enabled = true
+
+    [dpdp_accelerator.event_notifications.polling]
+    default_return_immediately = true
+    default_max_events = 20
+    max_events_limit = 100
+    request_hmac_validation_enabled = false
+
+    [dpdp_accelerator.event_notifications.webhook]
+    thread_pool_size = 4
+    base_backoff_seconds = 5
+    max_retries = 5
+    allow_http_callback_url = true
+    allowed_callback_ports = "-1,80,443,8443"
+    allow_private_network_callback_targets = false
+    delivery_worker_batch_size = 50
+    delivery_worker_poll_seconds = 5
+    stuck_inflight_threshold_seconds = 10
+    max_verification_response_body_bytes = 4096
+    pending_subscription_recovery_threshold_seconds = 60
+    background_worker_initial_delay_seconds = 10
+    pending_subscription_recovery_interval_seconds = 30
+    pending_subscription_recovery_batch_size = 20
+    worker_shutdown_timeout_seconds = 5
+
+    [dpdp_accelerator.consent_history]
+    enabled = true
+    snapshot_enabled = true
+
+    [dpdp_accelerator.consent_expiry]
+    enabled = true
+    schedule_mode = "daily"
+    daily_time = "00:00"
+    batch_size = 100
+    max_batches_per_run = 1000
+    max_run_seconds = 300

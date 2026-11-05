@@ -1,0 +1,100 @@
+# Local (Rancher Desktop) copy of ../mysql.yaml: runs the locally built image (imagePullPolicy
+# Never, no pull secret) on k3s's local-path storage.
+#
+# Needs secret/mysql-root (key "password") in the namespace.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      securityContext:
+        # mysql user in the official image; lets the volume be written without running as root.
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: mysql
+          image: wso2-dpdp/mysql:is7.3.0.0-acc1.0.0-rc3
+          imagePullPolicy: Never
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-root
+                  key: password
+          ports:
+            - containerPort: 3306
+              name: mysql
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The seed takes a few minutes on first start; the healthcheck only passes once it has
+          # finished, so IS is not pointed at a half-built schema.
+          startupProbe:
+            exec:
+              command: ["dpdp-healthcheck"]
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["dpdp-healthcheck"]
+            periodSeconds: 10
+            timeoutSeconds: 30
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysqladmin ping -uroot --silent"]
+            periodSeconds: 20
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # Omitted: uses the cluster default (nutanix-volume on NKP).
+        # storageClassName: nutanix-volume
+        resources:
+          requests:
+            storage: 20Gi

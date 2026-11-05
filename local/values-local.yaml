@@ -1,0 +1,28 @@
+# Rancher Desktop overrides, layered after ../values-dpdp.yaml:
+#   helm upgrade --install wso2is ../kubernetes-is -n wso2-dpdp \
+#     -f ../values-dpdp.yaml -f values-local.yaml -f ../values-secrets.yaml
+#
+# Runs the images built locally by solutions-dpdp (arm64 on Apple silicon), one replica, and
+# no AppArmor (the Rancher Desktop VM does not enable it). sslip.io resolves the hostname to
+# 127.0.0.1.
+deployment:
+  image:
+    registry: "docker.io"
+    repository: "wso2-dpdp/identity-server"
+    tag: "is7.3.0.0-acc1.0.0-rc3"
+    pullPolicy: "Never"
+    imagePullSecret: ""
+  replicas: 1
+  apparmor:
+    enabled: false
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1536Mi"
+    limits:
+      cpu: "3"
+      memory: "3Gi"
+    jvm:
+      memOpts: "-Xms1024m -Xmx1536m"
+  ingress:
+    hostName: "wso2is-127-0-0-1.sslip.io"

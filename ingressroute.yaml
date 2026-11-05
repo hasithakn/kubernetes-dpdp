@@ -1,0 +1,36 @@
+# Exposes IS through the cluster's Traefik (IngressClass kommander-traefik on NKP).
+#
+# Sticky sessions: a login flow keeps state on the node that started it, so a browser must stay
+# on one pod. HTTPS to the backend with verification off: IS listens on 9443 with its own
+# self-signed certificate.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: wso2is-backend-tls
+spec:
+  insecureSkipVerify: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: wso2is
+  annotations:
+    kubernetes.io/ingress.class: kommander-traefik
+spec:
+  routes:
+    - match: Host(`<IS_HOSTNAME>`)
+      kind: Rule
+      services:
+        # <release>-identity-server, from the chart's fullname helper.
+        - name: wso2is-identity-server
+          port: 9443
+          scheme: https
+          serversTransport: wso2is-backend-tls
+          sticky:
+            cookie:
+              name: wso2is-affinity
+              secure: true
+              httpOnly: true
+              sameSite: none
+  # Traefik's default certificate; replace with a cert-manager Certificate secret if needed.
+  tls: {}

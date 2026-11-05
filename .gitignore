@@ -1,0 +1,9 @@
+# Credentials and cluster access - never commit
+values-secrets.yaml
+values-secrets-*.yaml
+!values-secrets.example.yaml
+*kubeconfig*
+*.conf
+*password*
+
+.DS_Store
