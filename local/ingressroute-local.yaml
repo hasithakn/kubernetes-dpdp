@@ -15,6 +15,8 @@ kind: IngressRoute
 metadata:
   name: wso2is
 spec:
+  entryPoints:
+    - websecure
   routes:
     - match: Host(`wso2is-127-0-0-1.sslip.io`)
       kind: Rule
